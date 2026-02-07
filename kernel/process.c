@@ -266,3 +266,36 @@ int do_fork( process* parent)
 
   return child->pid;
 }
+
+int do_exec(char *filename) {
+  // 1. 清理当前进程的地址空间
+  for (int i = 0; i < current->total_mapped_region; i++) {
+    if (current->mapped_info[i].seg_type == CODE_SEGMENT || 
+        current->mapped_info[i].seg_type == DATA_SEGMENT ||
+        current->mapped_info[i].seg_type == HEAP_SEGMENT) {
+      for (int j = 0; j < current->mapped_info[i].npages; j++) {
+        user_vm_unmap(current->pagetable, current->mapped_info[i].va + j * PGSIZE, PGSIZE, 1);
+      }
+      current->mapped_info[i].va = 0;
+      current->mapped_info[i].npages = 0;
+    }
+  }
+
+  // 重置 total_mapped_region，保留 STACK, CONTEXT, SYSTEM, HEAP (虽然HEAP已清空)
+  // 实际上为了简单，我们可以只保留前3个基本段，然后重新加载 ELF
+  current->total_mapped_region = 3; 
+  // 重新初始化堆管理
+  current->user_heap.heap_top = USER_FREE_ADDRESS_START;
+  current->user_heap.heap_bottom = USER_FREE_ADDRESS_START;
+  current->user_heap.free_pages_count = 0;
+  current->mapped_info[HEAP_SEGMENT].npages = 0;
+
+  // 2. 加载新的 ELF 文件
+  load_bincode_from_vfs_elf(current, filename);
+
+  // 3. 返回到用户态执行新的程序
+  // 注意：exec 系统调用成功时不返回，所以我们直接修改 sepc 并通过 switch_to 切换
+  // 但在 do_syscall 中，它会返回到 handle_syscall，然后返回到用户态。
+  // 所以我们只需要设置好 epc 即可。
+  return 0;
+}
