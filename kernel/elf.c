@@ -226,7 +226,7 @@ elf_status vfs_elf_load(elf_ctx *ctx) {
   return EL_OK;
 }
 
-void load_bincode_from_vfs_elf(process *p, char *filename) {
+void load_bincode_from_vfs_elf(process *p, char *filename, char *para) {
   sprint("Application: %s\n", filename);
   elf_ctx elfloader;
   vfs_elf_info info;
@@ -237,5 +237,23 @@ void load_bincode_from_vfs_elf(process *p, char *filename) {
   if (vfs_elf_load(&elfloader) != EL_OK) panic("Fail on loading elf.\n");
   p->trapframe->epc = elfloader.ehdr.entry;
   vfs_close(info.f);
+
+  // 传递参数到用户栈
+  if (para) {
+    // 简单的参数传递：将参数字符串拷贝到用户栈顶
+    // 我们假设参数长度不超过 128 字节
+    uint64 sp = p->trapframe->regs.sp;
+    sp -= 128;
+    char *pa = (char *)user_va_to_pa(p->pagetable, (void *)sp);
+    strcpy(pa, para);
+    
+    // 设置 a0 (argc) 和 a1 (argv)
+    // 这里的简化实现：argc = 2 (程序名和参数), argv[0] = 程序名, argv[1] = para
+    // 为了简单，我们只传递一个参数字符串给 main
+    p->trapframe->regs.a1 = sp; 
+    p->trapframe->regs.a0 = 2; 
+    p->trapframe->regs.sp = sp;
+  }
+
   sprint("Application program entry point (virtual address): 0x%lx\n", p->trapframe->epc);
 }

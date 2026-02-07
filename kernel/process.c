@@ -267,7 +267,7 @@ int do_fork( process* parent)
   return child->pid;
 }
 
-int do_exec(char *filename) {
+int do_exec(char *filename, char *para) {
   // 1. 清理当前进程的地址空间
   for (int i = 0; i < current->total_mapped_region; i++) {
     if (current->mapped_info[i].seg_type == CODE_SEGMENT || 
@@ -281,21 +281,41 @@ int do_exec(char *filename) {
     }
   }
 
-  // 重置 total_mapped_region，保留 STACK, CONTEXT, SYSTEM, HEAP (虽然HEAP已清空)
-  // 实际上为了简单，我们可以只保留前3个基本段，然后重新加载 ELF
   current->total_mapped_region = 3; 
-  // 重新初始化堆管理
   current->user_heap.heap_top = USER_FREE_ADDRESS_START;
   current->user_heap.heap_bottom = USER_FREE_ADDRESS_START;
   current->user_heap.free_pages_count = 0;
   current->mapped_info[HEAP_SEGMENT].npages = 0;
 
   // 2. 加载新的 ELF 文件
-  load_bincode_from_vfs_elf(current, filename);
+  load_bincode_from_vfs_elf(current, filename, para);
 
-  // 3. 返回到用户态执行新的程序
-  // 注意：exec 系统调用成功时不返回，所以我们直接修改 sepc 并通过 switch_to 切换
-  // 但在 do_syscall 中，它会返回到 handle_syscall，然后返回到用户态。
-  // 所以我们只需要设置好 epc 即可。
   return 0;
+}
+
+extern process procs[NPROC];
+int do_wait(int pid) {
+  // 简单的 wait 实现：检查目标进程状态
+  // 如果目标进程不是 ZOMBIE，则将当前进程设为 READY 并重新调度
+  // 直到目标进程变成 ZOMBIE
+  while (1) {
+    int found = 0;
+    for (int i = 0; i < NPROC; i++) {
+      if (procs[i].pid == pid && procs[i].status != FREE) {
+        found = 1;
+        if (procs[i].status == ZOMBIE) {
+          // 目标进程已结束，清理并返回
+          procs[i].status = FREE; // 彻底释放
+          return 0;
+        }
+        break;
+      }
+    }
+    if (!found) return -1;
+
+    // 目标进程还在运行，让出 CPU
+    current->status = READY;
+    insert_to_ready_queue(current);
+    schedule();
+  }
 }
