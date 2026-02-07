@@ -3,9 +3,9 @@
 #include "util/types.h"
 
 int main(int argc, char *argv[]) {
-  char path[] = "/RAMDISK0";
+  char *path = argv[0];
   int dir_fd = opendir_u(path);
-  printu("------------------------------\n");
+  printu("---------- ls command -----------\n");
   printu("ls \"%s\":\n", path);
   printu("[name]               [inode_num]\n");
   struct dir dir;

@@ -109,7 +109,11 @@ int do_read(int fd, char *buf, uint64 count) {
 
   if (pfile->readable == 0) panic("do_read: no readable file!\n");
 
-  return vfs_read(pfile, buf, count);
+  char buffer[count + 1];
+  int len = vfs_read(pfile, buffer, count);
+  buffer[count] = '\0';
+  strcpy(buf, buffer);
+  return len;
 }
 
 //
