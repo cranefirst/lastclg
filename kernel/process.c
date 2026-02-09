@@ -266,3 +266,54 @@ int do_fork( process* parent)
 
   return child->pid;
 }
+
+int do_exec(char *filename, char *para) {
+  // 1. 清理当前进程的地址空间
+  for (int i = 0; i < current->total_mapped_region; i++) {
+    if (current->mapped_info[i].seg_type == CODE_SEGMENT || 
+        current->mapped_info[i].seg_type == DATA_SEGMENT ||
+        current->mapped_info[i].seg_type == HEAP_SEGMENT) {
+      for (int j = 0; j < current->mapped_info[i].npages; j++) {
+        user_vm_unmap(current->pagetable, current->mapped_info[i].va + j * PGSIZE, PGSIZE, 1);
+      }
+      current->mapped_info[i].va = 0;
+      current->mapped_info[i].npages = 0;
+    }
+  }
+
+  // 重置映射区域计数，保留前三个基本段 (STACK, CONTEXT, SYSTEM)
+  current->total_mapped_region = 3; 
+  // 重置堆管理
+  current->user_heap.heap_top = USER_FREE_ADDRESS_START;
+  current->user_heap.heap_bottom = USER_FREE_ADDRESS_START;
+  current->user_heap.free_pages_count = 0;
+  current->mapped_info[HEAP_SEGMENT].npages = 0;
+
+  // 2. 加载新的 ELF 文件
+  load_bincode_from_host_elf(current, filename, para);
+
+  return 0;
+}
+
+extern process procs[NPROC];
+int do_wait(int pid) {
+  while (1) {
+    int found = 0;
+    for (int i = 0; i < NPROC; i++) {
+      if (procs[i].pid == pid && procs[i].status != FREE) {
+        found = 1;
+        if (procs[i].status == ZOMBIE) {
+          procs[i].status = FREE; 
+          return 0;
+        }
+        break;
+      }
+    }
+    if (!found) return -1;
+
+    // 目标进程还在运行，让出 CPU
+    current->status = READY;
+    insert_to_ready_queue(current);
+    schedule();
+  }
+}

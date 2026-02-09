@@ -109,7 +109,7 @@ elf_status elf_load(elf_ctx *ctx) {
 //
 // load the elf of user application, by using the spike file interface.
 //
-void load_bincode_from_host_elf(process *p, char *filename) {
+void load_bincode_from_host_elf(process *p, char *filename, char *para) {
   sprint("Application: %s\n", filename);
 
   //elf loading. elf_ctx is defined in kernel/elf.h, used to track the loading process.
@@ -134,6 +134,20 @@ void load_bincode_from_host_elf(process *p, char *filename) {
 
   // close the vfs file
   vfs_close( info.f );
+
+  // 传递参数到用户栈
+  if (para) {
+    // 将参数字符串拷贝到用户栈顶（假设参数长度不超过 128 字节）
+    uint64 sp = p->trapframe->regs.sp;
+    sp -= 128;
+    char *pa = (char *)user_va_to_pa(p->pagetable, (void *)sp);
+    strcpy(pa, para);
+    
+    // 设置 a1 (argv) 为参数地址，a0 (argc) 为 2
+    p->trapframe->regs.a1 = sp; 
+    p->trapframe->regs.a0 = 2; 
+    p->trapframe->regs.sp = sp;
+  }
 
   sprint("Application program entry point (virtual address): 0x%lx\n", p->trapframe->epc);
 }
