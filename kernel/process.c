@@ -268,6 +268,12 @@ int do_fork( process* parent)
 }
 
 int do_exec(char *filename, char *para) {
+  // 在清理地址空间前，先将文件名和参数拷贝到内核栈中，防止指针失效
+  char fname[128];
+  char fpara[128];
+  strcpy(fname, filename);
+  if (para) strcpy(fpara, para);
+
   // 1. 清理当前进程的地址空间
   for (int i = 0; i < current->total_mapped_region; i++) {
     if (current->mapped_info[i].seg_type == CODE_SEGMENT || 
@@ -290,7 +296,7 @@ int do_exec(char *filename, char *para) {
   current->mapped_info[HEAP_SEGMENT].npages = 0;
 
   // 2. 加载新的 ELF 文件
-  load_bincode_from_host_elf(current, filename, para);
+  load_bincode_from_host_elf(current, fname, para ? fpara : NULL);
 
   return 0;
 }

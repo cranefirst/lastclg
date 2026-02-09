@@ -138,8 +138,9 @@ void load_bincode_from_host_elf(process *p, char *filename, char *para) {
   // 传递参数到用户栈
   if (para) {
     // 将参数字符串拷贝到用户栈顶（假设参数长度不超过 128 字节）
+    // 确保 sp 保持 16 字节对齐（RISC-V 调用规范）
     uint64 sp = p->trapframe->regs.sp;
-    sp -= 128;
+    sp = (sp - 128) & ~0xF; 
     char *pa = (char *)user_va_to_pa(p->pagetable, (void *)sp);
     strcpy(pa, para);
     
