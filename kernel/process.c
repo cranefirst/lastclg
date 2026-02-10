@@ -268,34 +268,44 @@ int do_fork( process* parent)
 }
 
 int do_exec(char *filename, char *para) {
-  // 在清理地址空间前，先将文件名和参数拷贝到内核栈中，防止指针失效
   char fname[128];
   char fpara[128];
   strcpy(fname, filename);
   if (para) strcpy(fpara, para);
 
-  // 1. 清理当前进程的地址空间
+  // 1. 彻底清理旧的映射区域
+  int new_total = 0;
   for (int i = 0; i < current->total_mapped_region; i++) {
     if (current->mapped_info[i].seg_type == CODE_SEGMENT || 
         current->mapped_info[i].seg_type == DATA_SEGMENT ||
         current->mapped_info[i].seg_type == HEAP_SEGMENT) {
+      // 取消映射并释放物理页
       for (int j = 0; j < current->mapped_info[i].npages; j++) {
         user_vm_unmap(current->pagetable, current->mapped_info[i].va + j * PGSIZE, PGSIZE, 1);
       }
-      current->mapped_info[i].va = 0;
+    } else {
+      // 保留 STACK, CONTEXT, SYSTEM 段
+      if (new_total != i) {
+        current->mapped_info[new_total] = current->mapped_info[i];
+      }
+      new_total++;
+    }
+  }
+  current->total_mapped_region = new_total;
+
+  // 2. 重置堆管理状态
+  current->user_heap.heap_top = USER_FREE_ADDRESS_START;
+  current->user_heap.heap_bottom = USER_FREE_ADDRESS_START;
+  current->user_heap.free_pages_count = 0;
+  // 确保 HEAP 段也被正确重置（如果它在保留段中）
+  for (int i = 0; i < current->total_mapped_region; i++) {
+    if (current->mapped_info[i].seg_type == HEAP_SEGMENT) {
+      current->mapped_info[i].va = USER_FREE_ADDRESS_START;
       current->mapped_info[i].npages = 0;
     }
   }
 
-  // 重置映射区域计数，保留前三个基本段 (STACK, CONTEXT, SYSTEM)
-  current->total_mapped_region = 4; 
-  // 重置堆管理
-  current->user_heap.heap_top = USER_FREE_ADDRESS_START;
-  current->user_heap.heap_bottom = USER_FREE_ADDRESS_START;
-  current->user_heap.free_pages_count = 0;
-  current->mapped_info[HEAP_SEGMENT].npages = 0;
-
-  // 2. 加载新的 ELF 文件
+  // 3. 加载新的 ELF 文件
   load_bincode_from_host_elf(current, fname, para ? fpara : NULL);
 
   return 0;

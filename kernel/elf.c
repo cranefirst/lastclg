@@ -76,6 +76,10 @@ elf_status elf_load(elf_ctx *ctx) {
     if (ph_addr.vaddr + ph_addr.memsz < ph_addr.vaddr) return EL_ERR;
 
     // allocate memory block before elf loading
+    // 检查是否已经存在映射，如果存在则先取消映射（针对 exec 场景的二次检查）
+    if (lookup_pa(((process*)(((elf_info*)(ctx->info))->p))->pagetable, ph_addr.vaddr) != 0) {
+      user_vm_unmap(((process*)(((elf_info*)(ctx->info))->p))->pagetable, ph_addr.vaddr, PGSIZE, 1);
+    }
     void *dest = elf_alloc_mb(ctx, ph_addr.vaddr, ph_addr.vaddr, ph_addr.memsz);
 
     // actual loading
