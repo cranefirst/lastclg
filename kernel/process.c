@@ -288,7 +288,7 @@ int do_exec(char *filename, char *para) {
   }
 
   // 重置映射区域计数，保留前三个基本段 (STACK, CONTEXT, SYSTEM)
-  current->total_mapped_region = 3; 
+  current->total_mapped_region = 4; 
   // 重置堆管理
   current->user_heap.heap_top = USER_FREE_ADDRESS_START;
   current->user_heap.heap_bottom = USER_FREE_ADDRESS_START;
@@ -301,7 +301,6 @@ int do_exec(char *filename, char *para) {
   return 0;
 }
 
-extern process procs[NPROC];
 int do_wait(int pid) {
   while (1) {
     int found = 0;
