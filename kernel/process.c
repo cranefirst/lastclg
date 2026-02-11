@@ -275,7 +275,6 @@ int do_exec(char *filename, char *para) {
   if (para) strcpy(fpara, para);
 
   // 1. 彻底清理旧的映射区域（CODE, DATA, HEAP）
-  // 保持索引逻辑，将保留的段（STACK, CONTEXT, SYSTEM）移到前面
   int new_total = 0;
   for (int i = 0; i < current->total_mapped_region; i++) {
     if (current->mapped_info[i].seg_type == CODE_SEGMENT || 
@@ -288,6 +287,13 @@ int do_exec(char *filename, char *para) {
       }
       new_total++;
     }
+  }
+  
+  // 清理剩余的 mapped_info 槽位，防止 load_elf 找到残留的 va=0 以外的条目
+  for (int i = new_total; i < PGSIZE/sizeof(mapped_region); i++) {
+    current->mapped_info[i].va = 0;
+    current->mapped_info[i].npages = 0;
+    current->mapped_info[i].seg_type = 0;
   }
   current->total_mapped_region = new_total;
 

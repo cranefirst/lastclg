@@ -125,46 +125,44 @@ void load_bincode_from_host_elf(process *p, char *filename, char *para) {
   vfs_close(info.f);
 
   // --- 【关键修复：构造标准 argv 数组】 ---
+  uint64 sp = p->trapframe->regs.sp;
+
+  // a. 首先将参数字符串和文件名字符串压入栈顶
+  // 我们预留空间并确保 16 字节对齐
+  sp -= 256; 
+  sp &= ~0xF;
+
+  // 物理地址转换，用于内核写入
+  char *stack_pa = (char *)user_va_to_pa(p->pagetable, (void *)sp);
+  
+  // 在栈上分配空间存放字符串内容
+  char *argv0_str = stack_pa;           // argv[0] 放在前面
+  char *argv1_str = stack_pa + 128;     // argv[1] 放在后面
+  strcpy(argv0_str, filename);
+  if (para) strcpy(argv1_str, para);
+
+  // 计算这些字符串在用户态的虚拟地址
+  uint64 argv0_va = sp;
+  uint64 argv1_va = sp + 128;
+
+  // b. 构造指针数组 argv[] = {argv0_va, argv1_va, NULL}
+  sp -= 32; 
+  sp &= ~0xF;
+  uint64 *argv_array_pa = (uint64 *)user_va_to_pa(p->pagetable, (void *)sp);
+  
+  argv_array_pa[0] = argv0_va;
   if (para) {
-    uint64 sp = p->trapframe->regs.sp;
-
-    // a. 首先将参数字符串和文件名字符串压入栈顶
-    // 我们预留空间并确保 16 字节对齐
-    sp -= 256; 
-    sp &= ~0xF;
-
-    // 物理地址转换，用于内核写入
-    char *stack_pa = (char *)user_va_to_pa(p->pagetable, (void *)sp);
-    
-    // 在栈上分配空间存放字符串内容
-    char *argv1_str = stack_pa;           // 参数内容放在前面
-    char *argv0_str = stack_pa + 128;     // 文件名内容放在后面
-    strcpy(argv1_str, para);
-    strcpy(argv0_str, filename);
-
-    // 计算这些字符串在用户态的虚拟地址
-    uint64 argv1_va = sp;
-    uint64 argv0_va = sp + 128;
-
-    // b. 构造指针数组 argv[] = {argv0_va, argv1_va, NULL}
-    // 数组需要放在字符串下面（更低的地址）
-    sp -= 32; 
-    sp &= ~0xF;
-    uint64 *argv_array_pa = (uint64 *)user_va_to_pa(p->pagetable, (void *)sp);
-    
-    argv_array_pa[0] = argv0_va;
     argv_array_pa[1] = argv1_va;
-    argv_array_pa[2] = 0; // 结尾必须是 NULL
-
-    // c. 正确设置寄存器：a0=argc, a1=argv(数组首地址)
-    p->trapframe->regs.a0 = 2;              // argc
-    p->trapframe->regs.a1 = sp;             // argv (指向指针数组的指针)
-    p->trapframe->regs.sp = sp;             // 更新用户栈指针
+    argv_array_pa[2] = 0;
+    p->trapframe->regs.a0 = 2;
   } else {
-      // 如果没有参数，至少也要准备 argv[0] 和 NULL
-      // 这里为了简单，如果 shellrc 保证有参数可跳过，但建议加上
-      p->trapframe->regs.a0 = 1;
+    argv_array_pa[1] = 0;
+    p->trapframe->regs.a0 = 1;
   }
+
+  // c. 正确设置寄存器：a0=argc, a1=argv(数组首地址)
+  p->trapframe->regs.a1 = sp;             // argv (指向指针数组的指针)
+  p->trapframe->regs.sp = sp;             // 更新用户栈指针
 
   sprint("Application program entry point (virtual address): 0x%lx\n", p->trapframe->epc);
 }
