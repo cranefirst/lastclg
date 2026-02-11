@@ -268,21 +268,21 @@ int do_fork( process* parent)
 }
 
 int do_exec(char *filename, char *para) {
+  // 备份路径和参数，防止内存释放后 pathpa 变成野指针
   char fname[128];
   char fpara[128];
   strcpy(fname, filename);
   if (para) strcpy(fpara, para);
 
-  // 1. 彻底清理旧的映射区域
+  // 1. 彻底清理旧的映射区域（CODE, DATA, HEAP）
+  // 保持索引逻辑，将保留的段（STACK, CONTEXT, SYSTEM）移到前面
   int new_total = 0;
   for (int i = 0; i < current->total_mapped_region; i++) {
     if (current->mapped_info[i].seg_type == CODE_SEGMENT || 
         current->mapped_info[i].seg_type == DATA_SEGMENT ||
         current->mapped_info[i].seg_type == HEAP_SEGMENT) {
-      // 取消映射并释放物理页
       user_vm_unmap(current->pagetable, current->mapped_info[i].va, current->mapped_info[i].npages * PGSIZE, 1);
     } else {
-      // 保留 STACK, CONTEXT, SYSTEM 段
       if (new_total != i) {
         current->mapped_info[new_total] = current->mapped_info[i];
       }
@@ -291,21 +291,16 @@ int do_exec(char *filename, char *para) {
   }
   current->total_mapped_region = new_total;
 
-  // 2. 重置堆管理状态
+  // 2. 重置堆管理
   current->user_heap.heap_top = USER_FREE_ADDRESS_START;
   current->user_heap.heap_bottom = USER_FREE_ADDRESS_START;
   current->user_heap.free_pages_count = 0;
-  // 确保 HEAP 段也被正确重置（如果它在保留段中）
-  for (int i = 0; i < current->total_mapped_region; i++) {
-    if (current->mapped_info[i].seg_type == HEAP_SEGMENT) {
-      current->mapped_info[i].va = USER_FREE_ADDRESS_START;
-      current->mapped_info[i].npages = 0;
-    }
-  }
 
-  // 3. 加载新的 ELF 文件
+  // 3. 加载新 ELF（此时 elfc.c 中修正后的参数传递逻辑会起作用）
   load_bincode_from_host_elf(current, fname, para ? fpara : NULL);
 
+  // 刷新 TLB 确保新映射生效
+  flush_tlb();
   return 0;
 }
 

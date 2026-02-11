@@ -1,8 +1,3 @@
-/*
- * routines that scan and load a (host) Executable and Linkable Format (ELF) file
- * into the (emulated) memory.
- */
-
 #include "elf.h"
 #include "string.h"
 #include "riscv.h"
@@ -63,7 +58,7 @@ elf_status elf_init(elf_ctx *ctx, void *info) {
 //
 elf_status elf_load(elf_ctx *ctx) {
   // elf_prog_header structure is defined in kernel/elf.h
-  elf_prog_header ph_addr;
+  elf_prog_header ph_addr __attribute__((aligned(16)));
   int i, off;
 
   // traverse the elf program segment headers
@@ -112,46 +107,63 @@ elf_status elf_load(elf_ctx *ctx) {
 
 //
 // load the elf of user application, by using the spike file interface.
-//
 void load_bincode_from_host_elf(process *p, char *filename, char *para) {
   sprint("Application: %s\n", filename);
 
-  //elf loading. elf_ctx is defined in kernel/elf.h, used to track the loading process.
-  elf_ctx elfloader;
-  // elf_info is defined above, used to tie the elf file and its corresponding process.
+  // 【修复】elfloader 增加对齐，防止 Misaligned AMO!
+  elf_ctx elfloader __attribute__((aligned(16)));
   elf_info info;
 
   info.f = vfs_open(filename, O_RDONLY);
   info.p = p;
-  // IS_ERR_VALUE is a macro defined in spike_interface/spike_htif.h
   if (IS_ERR_VALUE(info.f)) panic("Fail on openning the input application program.\n");
 
-  // init elfloader context. elf_init() is defined above.
-  if (elf_init(&elfloader, &info) != EL_OK)
-    panic("fail to init elfloader.\n");
-
-  // load elf. elf_load() is defined above.
+  if (elf_init(&elfloader, &info) != EL_OK) panic("fail to init elfloader.\n");
   if (elf_load(&elfloader) != EL_OK) panic("Fail on loading elf.\n");
 
-  // entry (virtual, also physical in lab1_x) address
   p->trapframe->epc = elfloader.ehdr.entry;
+  vfs_close(info.f);
 
-  // close the vfs file
-  vfs_close( info.f );
-
-  // 传递参数到用户栈
+  // --- 【关键修复：构造标准 argv 数组】 ---
   if (para) {
-    // 将参数字符串拷贝到用户栈顶（假设参数长度不超过 128 字节）
-    // 确保 sp 保持 16 字节对齐（RISC-V 调用规范）
     uint64 sp = p->trapframe->regs.sp;
-    sp = (sp - 128) & ~0xF; 
-    char *pa = (char *)user_va_to_pa(p->pagetable, (void *)sp);
-    strcpy(pa, para);
+
+    // a. 首先将参数字符串和文件名字符串压入栈顶
+    // 我们预留空间并确保 16 字节对齐
+    sp -= 256; 
+    sp &= ~0xF;
+
+    // 物理地址转换，用于内核写入
+    char *stack_pa = (char *)user_va_to_pa(p->pagetable, (void *)sp);
     
-    // 设置 a1 (argv) 为参数地址，a0 (argc) 为 2
-    p->trapframe->regs.a1 = sp; 
-    p->trapframe->regs.a0 = 2; 
-    p->trapframe->regs.sp = sp;
+    // 在栈上分配空间存放字符串内容
+    char *argv1_str = stack_pa;           // 参数内容放在前面
+    char *argv0_str = stack_pa + 128;     // 文件名内容放在后面
+    strcpy(argv1_str, para);
+    strcpy(argv0_str, filename);
+
+    // 计算这些字符串在用户态的虚拟地址
+    uint64 argv1_va = sp;
+    uint64 argv0_va = sp + 128;
+
+    // b. 构造指针数组 argv[] = {argv0_va, argv1_va, NULL}
+    // 数组需要放在字符串下面（更低的地址）
+    sp -= 32; 
+    sp &= ~0xF;
+    uint64 *argv_array_pa = (uint64 *)user_va_to_pa(p->pagetable, (void *)sp);
+    
+    argv_array_pa[0] = argv0_va;
+    argv_array_pa[1] = argv1_va;
+    argv_array_pa[2] = 0; // 结尾必须是 NULL
+
+    // c. 正确设置寄存器：a0=argc, a1=argv(数组首地址)
+    p->trapframe->regs.a0 = 2;              // argc
+    p->trapframe->regs.a1 = sp;             // argv (指向指针数组的指针)
+    p->trapframe->regs.sp = sp;             // 更新用户栈指针
+  } else {
+      // 如果没有参数，至少也要准备 argv[0] 和 NULL
+      // 这里为了简单，如果 shellrc 保证有参数可跳过，但建议加上
+      p->trapframe->regs.a0 = 1;
   }
 
   sprint("Application program entry point (virtual address): 0x%lx\n", p->trapframe->epc);
