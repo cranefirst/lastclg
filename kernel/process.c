@@ -268,44 +268,38 @@ int do_fork( process* parent)
 }
 
 int do_exec(char *filename, char *para) {
-  // 备份路径和参数，防止内存释放后 pathpa 变成野指针
   char fname[128];
   char fpara[128];
   strcpy(fname, filename);
   if (para) strcpy(fpara, para);
 
-  // 1. 彻底清理旧的映射区域（CODE, DATA, HEAP）
-  int new_total = 0;
+  // 1. 彻底清理旧的映射区域（只清理 CODE 和 DATA）
+  // PKE 初始分配 4 个段：0:STACK, 1:CONTEXT, 2:SYSTEM, 3:HEAP
   for (int i = 0; i < current->total_mapped_region; i++) {
     if (current->mapped_info[i].seg_type == CODE_SEGMENT || 
-        current->mapped_info[i].seg_type == DATA_SEGMENT ||
-        current->mapped_info[i].seg_type == HEAP_SEGMENT) {
+        current->mapped_info[i].seg_type == DATA_SEGMENT) {
       user_vm_unmap(current->pagetable, current->mapped_info[i].va, current->mapped_info[i].npages * PGSIZE, 1);
-    } else {
-      if (new_total != i) {
-        current->mapped_info[new_total] = current->mapped_info[i];
-      }
-      new_total++;
+      current->mapped_info[i].va = 0;
+      current->mapped_info[i].npages = 0;
+      current->mapped_info[i].seg_type = 0;
     }
   }
   
-  // 清理剩余的 mapped_info 槽位，防止 load_elf 找到残留的 va=0 以外的条目
-  for (int i = new_total; i < PGSIZE/sizeof(mapped_region); i++) {
-    current->mapped_info[i].va = 0;
-    current->mapped_info[i].npages = 0;
-    current->mapped_info[i].seg_type = 0;
-  }
-  current->total_mapped_region = new_total;
+  // 重置映射区域计数到 4 (保留前 4 个基本段)
+  current->total_mapped_region = 4;
 
-  // 2. 重置堆管理
+  // 2. 重置堆管理状态
   current->user_heap.heap_top = USER_FREE_ADDRESS_START;
   current->user_heap.heap_bottom = USER_FREE_ADDRESS_START;
   current->user_heap.free_pages_count = 0;
+  // 重置 HEAP 段描述符 (offset 3)
+  current->mapped_info[3].va = USER_FREE_ADDRESS_START;
+  current->mapped_info[3].npages = 0;
+  current->mapped_info[3].seg_type = HEAP_SEGMENT;
 
-  // 3. 加载新 ELF（此时 elfc.c 中修正后的参数传递逻辑会起作用）
+  // 3. 加载新 ELF
   load_bincode_from_host_elf(current, fname, para ? fpara : NULL);
 
-  // 刷新 TLB 确保新映射生效
   flush_tlb();
   return 0;
 }
@@ -325,7 +319,6 @@ int do_wait(int pid) {
     }
     if (!found) return -1;
 
-    // 目标进程还在运行，让出 CPU
     current->status = READY;
     insert_to_ready_queue(current);
     schedule();

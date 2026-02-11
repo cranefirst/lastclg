@@ -133,17 +133,15 @@ void load_bincode_from_host_elf(process *p, char *filename, char *para) {
 
   char *stack_pa = (char *)user_va_to_pa(p->pagetable, (void *)sp);
   
-  // 【关键调整】为了适配 app_ls.c (使用 argv[0] 作为路径)
-  // 我们将用户传递的参数 para 放在 argv[0]
-  // 将程序名 filename 放在 argv[1]
+  // 构造标准参数传递顺序
+  // argv[0] = filename (程序名)
+  // argv[1] = para (参数)
   char *argv0_str = stack_pa;           
   char *argv1_str = stack_pa + 128;     
   
+  strcpy(argv0_str, filename);
   if (para) {
-    strcpy(argv0_str, para);
-    strcpy(argv1_str, filename);
-  } else {
-    strcpy(argv0_str, filename);
+    strcpy(argv1_str, para);
   }
 
   uint64 argv0_va = sp;
