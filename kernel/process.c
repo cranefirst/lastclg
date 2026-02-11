@@ -280,9 +280,7 @@ int do_exec(char *filename, char *para) {
         current->mapped_info[i].seg_type == DATA_SEGMENT ||
         current->mapped_info[i].seg_type == HEAP_SEGMENT) {
       // 取消映射并释放物理页
-      for (int j = 0; j < current->mapped_info[i].npages; j++) {
-        user_vm_unmap(current->pagetable, current->mapped_info[i].va + j * PGSIZE, PGSIZE, 1);
-      }
+      user_vm_unmap(current->pagetable, current->mapped_info[i].va, current->mapped_info[i].npages * PGSIZE, 1);
     } else {
       // 保留 STACK, CONTEXT, SYSTEM 段
       if (new_total != i) {
