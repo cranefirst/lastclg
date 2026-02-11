@@ -128,24 +128,28 @@ void load_bincode_from_host_elf(process *p, char *filename, char *para) {
   uint64 sp = p->trapframe->regs.sp;
 
   // a. 首先将参数字符串和文件名字符串压入栈顶
-  // 我们预留空间并确保 16 字节对齐
   sp -= 256; 
   sp &= ~0xF;
 
-  // 物理地址转换，用于内核写入
   char *stack_pa = (char *)user_va_to_pa(p->pagetable, (void *)sp);
   
-  // 在栈上分配空间存放字符串内容
-  char *argv0_str = stack_pa;           // argv[0] 放在前面
-  char *argv1_str = stack_pa + 128;     // argv[1] 放在后面
-  strcpy(argv0_str, filename);
-  if (para) strcpy(argv1_str, para);
+  // 【关键调整】为了适配 app_ls.c (使用 argv[0] 作为路径)
+  // 我们将用户传递的参数 para 放在 argv[0]
+  // 将程序名 filename 放在 argv[1]
+  char *argv0_str = stack_pa;           
+  char *argv1_str = stack_pa + 128;     
+  
+  if (para) {
+    strcpy(argv0_str, para);
+    strcpy(argv1_str, filename);
+  } else {
+    strcpy(argv0_str, filename);
+  }
 
-  // 计算这些字符串在用户态的虚拟地址
   uint64 argv0_va = sp;
   uint64 argv1_va = sp + 128;
 
-  // b. 构造指针数组 argv[] = {argv0_va, argv1_va, NULL}
+  // b. 构造指针数组 argv[]
   sp -= 32; 
   sp &= ~0xF;
   uint64 *argv_array_pa = (uint64 *)user_va_to_pa(p->pagetable, (void *)sp);
